@@ -1,0 +1,480 @@
+---
+
+title: "Student Stress Monitoring Project"
+author: "Group 1: Mohamad Afrillian Ramadhan, Lexxie Liu, Ocean Liu, Xuyi Wu, Le Kim Ngan Hoang"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+echo = TRUE,
+warning = FALSE,
+message = FALSE
+)
+```
+# Overview
+
+This document presents an exploratory and predictive analysis of student stress levels. The analysis is organized around four research questions (RQ1–RQ5), covering descriptive statistics, correlation analysis, inferential statistics, predictive modeling, and clustering.
+
+
+```{r}
+# RQ1: What proportion of students experience no stress at all, some stress, and high stress?
+
+## Libraries
+
+library(ggplot2)
+library(dplyr)
+library(viridis)
+
+## Data Loading
+
+df <- read.csv("StressLevelDataset.csv")
+
+## Stress Level Labels
+
+stress_labels <- c("No Stress (0)", "Moderate Stress (1)", "High Stress (2)")
+
+## Bar Chart: Count of Students by Stress Level
+
+stress_counts <- df %>%
+group_by(stress_level) %>%
+summarise(n = n()) %>%
+arrange(stress_level)
+
+p1 <- ggplot(stress_counts,
+aes(x = factor(stress_level), y = n, fill = factor(stress_level))) +
+geom_col() +
+geom_text(aes(label = n), vjust = -0.5, size = 5) +
+scale_x_discrete(labels = stress_labels) +
+scale_fill_viridis(discrete = TRUE, option = "D") +
+labs(title = "Count of Students by Stress Level",
+x = "Stress Level",
+y = "Count") +
+theme_minimal(base_size = 14) +
+theme(legend.position = "none",
+plot.title = element_text(hjust = 0.5, face = "bold"))
+
+p1
+
+## Pie Chart: Proportion of Stress Levels
+
+pie_data <- df %>%
+group_by(stress_level) %>%
+summarise(n = n()) %>%
+arrange(stress_level) %>%
+mutate(
+stress_factor = factor(
+stress_level,
+levels = c(0, 1, 2),
+labels = stress_labels
+),
+pct = n / sum(n),
+pct_label = sprintf("%.1f%%", pct * 100),
+mid = cumsum(pct) - pct / 2
+)
+
+p2 <- ggplot(pie_data, aes(x = 1, y = pct, fill = stress_factor)) +
+geom_col(width = 1, color = "white") +
+coord_polar(theta = "y", start = 140 * pi / 180) +
+scale_fill_viridis(discrete = TRUE, option = "D") +
+geom_text(aes(x = 1, y = mid,
+label = paste0(stress_factor, "\n", pct_label)),
+size = 4) +
+xlim(0, 1.9) +
+labs(title = "Proportion of Stress Levels") +
+theme_void(base_size = 14) +
+theme(legend.position = "none",
+plot.title = element_text(hjust = 0.5, face = "bold"),
+plot.margin = margin(10, 40, 10, 10))
+
+p2
+```
+
+
+```{r}
+# RQ2: How are different parts of student life—like sleep, workload, or social life—linked to stress levels?
+
+library(corrplot)
+
+numeric_df <- df[sapply(df, is.numeric)]
+corr <- cor(numeric_df, method = "spearman")
+
+# Extract correlation pairs and their values
+corr_pairs <- data.frame(
+  Var1 = character(),
+  Var2 = character(),
+  Correlation = numeric(),
+  stringsAsFactors = FALSE
+)
+
+n_vars <- nrow(corr)
+for (i in 1:(n_vars-1)) {
+  for (j in (i+1):n_vars) {
+    corr_pairs <- rbind(corr_pairs, data.frame(
+      Var1 = rownames(corr)[i],
+      Var2 = colnames(corr)[j],
+      Correlation = corr[i, j],
+      stringsAsFactors = FALSE
+    ))
+  }
+}
+
+# Sort by absolute correlation value and get top 10
+corr_pairs_sorted <- corr_pairs[order(-abs(corr_pairs$Correlation)), ]
+top_10 <- corr_pairs_sorted[1:10, ]
+
+print("Top 10 Correlations:")
+print(top_10)
+
+# Create correlation matrix visualization
+corrplot(corr,
+         method = "color",
+         type = "lower",
+         tl.col = "black",
+         tl.cex = 0.6,    
+         tl.srt = 45)
+
+
+numeric_cols <- names(df)[sapply(df, is.numeric)]
+
+par(mfrow = c(1, 1))  # 3 rows, 3 columns
+for(col in numeric_cols) {
+  hist(df[[col]],
+       main = paste("Distribution of", col),
+       xlab = "Score",
+       col = "skyblue",
+       probability = TRUE,  # Use density instead of frequency
+       border = "white"
+  )
+  
+  # Add density curve
+  lines(density(df[[col]], na.rm = TRUE),
+        col = "darkblue",
+        lwd = 2)
+}
+
+par(mfrow = c(1, 1))  # Reset to default
+
+
+summary(aov(self_esteem ~ factor(stress_level), data = df))
+numeric_cols <- setdiff(names(df[sapply(df, is.numeric)]), "stress_level")
+
+anova_results <- data.frame(Feature = character(),
+                            F = numeric(),
+                            P = numeric())
+
+for(col in numeric_cols) {
+  model <- aov(df[[col]] ~ factor(df$stress_level))
+  result <- summary(model)[[1]]
+
+  anova_results <- rbind(
+    anova_results,
+    data.frame(Feature = col,
+               F = result$`F value`[1],
+               P = result$`Pr(>F)`[1])
+  )
+}
+
+
+library(ggplot2)
+
+numeric_cols <- names(df)[sapply(df, is.numeric)]
+numeric_cols <- numeric_cols[numeric_cols != "stress_level"]
+target <- as.factor(df$stress_level)  # ← Convert to factor/category
+
+anova_results <- data.frame(
+  Feature = character(),
+  F.Statistic = numeric(),
+  p_value = numeric(),
+  stringsAsFactors = FALSE
+)
+
+for (col in numeric_cols) {
+  f_stat <- summary(aov(df[[col]] ~ target))[[1]]$`F value`[1]
+  p_val <- summary(aov(df[[col]] ~ target))[[1]]$`Pr(>F)`[1]
+  
+  anova_results <- rbind(anova_results, 
+                         data.frame(Feature = col, 
+                                    F.Statistic = f_stat,
+                                    p_value = p_val))
+}
+
+anova_df <- anova_results
+
+# Sort by F-Statistic in descending order
+anova_df <- anova_df[order(-anova_df$F.Statistic), ]
+top_n <- 10
+
+# Create color vector: top 5 with viridis palette, others gray
+viridis_palette <- c("#440154", "#31688e", "#35b779", "#fde724", "#21908c", "#440154", "#31688e", "#35b779", "#fde724", "#21908c")[1:top_n]
+colors <- rep("#d3d3d3", nrow(anova_df))
+colors[1:top_n] <- viridis_palette
+
+# Convert Feature to factor with custom order (maintains sort)
+anova_df$Feature <- factor(anova_df$Feature, 
+                           levels = rev(anova_df$Feature))
+
+# Create barplot
+ggplot(anova_df, aes(x = F.Statistic, y = Feature, fill = Feature)) +
+  geom_bar(stat = "identity") +
+  scale_fill_manual(values = setNames(colors, anova_df$Feature)) +
+  labs(title = "Feature Importance (ANOVA F-Statistic)",
+       x = "F-Statistic (Separation Power)",
+       y = "Feature") +
+  theme_minimal() +
+  theme(legend.position = "none",
+        axis.text.y = element_text(size = 10),
+        plot.title = element_text(size = 14, face = "bold")) +
+  coord_cartesian(expand = FALSE)
+
+summary(aov(self_esteem ~ factor(stress_level), data = df))
+numeric_cols <- setdiff(names(df[sapply(df, is.numeric)]), "stress_level")
+
+anova_results <- data.frame(Feature = character(),
+                            F = numeric(),
+                            P = numeric())
+
+for(col in numeric_cols) {
+  model <- aov(df[[col]] ~ factor(df$stress_level))
+  result <- summary(model)[[1]]
+
+  anova_results <- rbind(
+    anova_results,
+    data.frame(Feature = col,
+               F = result$`F value`[1],
+               P = result$`Pr(>F)`[1])
+  )
+}
+
+# Sort by p-value (ascending - smallest/most significant first)
+anova_results_sorted <- anova_results[order(anova_results$P), ]
+
+# Print all results
+print("All ANOVA Results (sorted by P-Value):")
+print(anova_results_sorted)
+
+# Visualization of p-values distribution
+library(ggplot2)
+
+# Create a data frame with point colors
+plot_data <- data.frame(
+  Feature = anova_results_sorted$Feature,
+  P = anova_results_sorted$P,
+  IsMax = c(rep(FALSE, nrow(anova_results_sorted) - 1), TRUE)
+)
+
+# Add index column
+plot_data$Index <- seq_along(plot_data$P)
+
+# Set figure size
+options(repr.plot.width = 14, repr.plot.height = 6)
+
+# Create scatter plot of p-value distribution
+ggplot(plot_data, aes(x = Index, y = P, color = IsMax, size = IsMax)) +
+  geom_point() +
+  geom_line(color = "#CCCCCC", linewidth = 0.5) +
+  scale_color_manual(values = c("FALSE" = "#2E86AB", "TRUE" = "#E63946")) +
+  scale_size_manual(values = c("FALSE" = 3, "TRUE" = 6)) +
+  labs(title = "P-Value Distribution",
+       x = "Feature Index",
+       y = "P-Value") +
+  theme_minimal() +
+  theme(legend.position = "none",
+        plot.title = element_text(size = 14, face = "bold", hjust=0.5),
+        axis.text.x = element_blank(),
+        plot.margin = margin(t = 10, r = 10, b = 30, l = 10)) +
+  geom_text(data = plot_data[plot_data$IsMax, ],
+            aes(label = Feature),
+            vjust = 1.8, 
+            hjust = 1,
+            color = "#E63946",
+            size = 3.5,
+            check_overlap = FALSE) +
+  geom_text(data = plot_data[plot_data$IsMax, ],
+            aes(label = P),
+            vjust = 4, 
+            hjust = 1,
+            color = "#E63946",
+            size = 3,
+            check_overlap = TRUE)
+
+# Print the largest p-value summary
+cat("\n\nLargest P-Value (Least Significant):\n")
+cat("Feature:", anova_results_sorted$Feature[nrow(anova_results_sorted)], "\n")
+cat("P-Value:", anova_results_sorted$P[nrow(anova_results_sorted)], "\n")
+
+```
+
+
+
+```{r}
+#RQ3: Can we predict the student stress level from the given factors?
+#RQ5:  If we only look at the most important causes of stress, does it make our predictions more accurate?
+
+#Logistic Regression R all features
+library(caTools)
+library(caret)
+
+set.seed(123)
+
+stressData$stress_level <- as.factor(stressData$stress_level)
+
+#k-fold cross-validation
+train_data <- trainControl(method = "cv", number = 5, savePredictions = "final")
+
+logistic_reg <- train(stress_level ~ bullying + anxiety_level + depression + future_career_concerns + headache + extracurricular_activities + peer_pressure + mental_health_history + blood_pressure + sleep_quality + breathing_problem + noise_level + living_conditions + safety + basic_needs + academic_performance + study_load + teacher_student_relationship + social_support + self_esteem , data = stressData,trControl = train_data, method="multinom")
+summary(logistic_reg)
+
+#Print confusion matrix to assess prediction accuracy
+library(caret)
+library(Metrics)
+confusionMatrix(data = logistic_reg$pred$pred, reference = logistic_reg$pred$obs, mode = "prec_recall")
+
+#Logistic Regression R selected using ANOVA F-Statistics
+library(caTools)
+library(Metrics)
+
+set.seed(123)
+train_reg <- trainControl(method = "cv", number = 5, savePredictions = "final")
+
+logistic_reg_select_anova <- train(stress_level ~ blood_pressure + self_esteem + bullying + sleep_quality + future_career_concerns + anxiety_level + depression + academic_performance + safety + basic_needs, data = stressData, method = "multinom", trControl = train_reg)
+
+confusionMatrix(data = logistic_reg_select_anova$pred$pred, reference = logistic_reg_select_anova$pred$obs, mode = "prec_recall")
+
+library(VGAM)
+
+logistic_anova <- vglm(stress_level ~ blood_pressure + self_esteem + bullying + sleep_quality + future_career_concerns + anxiety_level + depression + academic_performance + safety + basic_needs, data = stressData, family = multinomial)
+
+summary(logistic_anova)
+
+#Logistic Regression R selected using ANOVA F-Statistics & Logistic Regression Feature Importance
+library(caTools)
+library(Metrics)
+
+set.seed(123)
+
+logistic_reg_select_anova_log <- train(stress_level ~ self_esteem + bullying + sleep_quality + anxiety_level + depression + academic_performance + safety + basic_needs, data = stressData, method = "multinom", trControl = train_reg)
+
+confusionMatrix(data = logistic_reg_select_anova_log$pred$pred, reference = logistic_reg_select_anova_log$pred$obs, mode = "prec_recall")
+
+#Random Forest All Features Classification Accuracy
+library(caret)
+
+set.seed(123) 
+
+train_data_ran <- trainControl(method = "cv", number = 5, savePredictions = "final")
+
+rf_model <- train(stress_level ~ bullying + anxiety_level + depression + future_career_concerns + headache + extracurricular_activities + peer_pressure + mental_health_history + blood_pressure + sleep_quality + breathing_problem + noise_level + living_conditions + safety + basic_needs + academic_performance + study_load + teacher_student_relationship + social_support + self_esteem, data = stressData, method = 'rf', ntree = 500, trControl = train_data_ran)
+
+confusionMatrix(data = rf_model$pred$pred, reference = rf_model$pred$obs, mode="prec_recall")
+
+#Random Forest Selected Features (Anova) Classification Accuracy
+library(caret)
+
+set.seed(218)
+rf_model_new <- train(stress_level ~ blood_pressure + self_esteem + bullying + sleep_quality + future_career_concerns + anxiety_level + depression + academic_performance + safety + basic_needs, data = stressData, method = 'rf', ntree = 500, trControl = train_data_ran)
+
+confusionMatrix(data = rf_model_new$pred$pred, reference = rf_model_new$pred$obs, mode="prec_recall")
+
+# Extract variable importance
+var_imp <- varImp(rf_model_new)
+# Plot it
+plot(var_imp, main = "Random Forest Variable Importance")
+
+#Random Forest Selected Features (Anova + Feature) Classification Accuracy
+library(caret)
+
+set.seed(218)
+rf_model_meth <- train(stress_level ~ blood_pressure + self_esteem + bullying + sleep_quality + depression + academic_performance + basic_needs, data = stressData, method = 'rf', ntree = 500, trControl = train_data_ran)
+print("Random Forest with Anova + Feature Importance Selection")
+confusionMatrix(data = rf_model_meth$pred$pred, reference = rf_model_meth$pred$obs, mode="prec_recall")
+```
+
+
+
+```{r}
+# RQ4: What types of student profiles can be identified based on their lifestyle factors and stress levels?
+
+#install.packages("readr")
+#install.packages("cluster")
+#install.packages("ggplot2")
+
+
+# Load packages
+library(readr)      # for read_csv
+library(cluster)   # for silhouette()
+library(ggplot2)    # for plots
+
+# Read data (upload your CSV into the Files pane first)
+df <- read_csv("StressLevelDataset.csv")
+
+# Take a quick look
+head(df)
+
+# Select lifestyle-related features (same as your Python version)
+features <- df[, c(
+  "sleep_quality",
+  "extracurricular_activities",
+  "noise_level",
+  "living_conditions",
+  "basic_needs",
+  "stress_level"
+)]
+
+# Population standard deviation (ddof = 0, like sklearn)
+pop_sd <- function(x) sqrt(mean((x - mean(x))^2))
+
+X_scaled <- scale(
+  features,
+  center = TRUE,
+  scale = apply(features, 2, pop_sd)
+)
+
+summary(X_scaled)
+
+set.seed(0)
+
+k_range <- 2:7
+sse <- numeric(length(k_range))
+
+for (i in seq_along(k_range)) {
+  k <- k_range[i]
+  km <- kmeans(X_scaled, centers = k, nstart = 25)
+  sse[i] <- km$tot.withinss
+}
+
+# Plot elbow curve
+plot(
+  x = k_range,
+  y = sse,
+  type = "b",
+  xlab = "Number of clusters (k)",
+  ylab = "SSE",
+  main = "Elbow Method for Optimal k"
+)
+
+set.seed(0)
+k_opt <- 3
+
+kmeans_final <- kmeans(X_scaled, centers = k_opt, nstart = 25)
+
+# Add cluster label to original data
+df$Cluster <- kmeans_final$cluster
+
+# --- Get cluster centers back on original scale ---
+centers_scaled <- kmeans_final$centers
+
+centers_original <- sweep(
+  centers_scaled, 2, attr(X_scaled, "scaled:scale"), `*`
+)
+centers_original <- sweep(
+  centers_original, 2, attr(X_scaled, "scaled:center"), `+`
+)
+
+cluster_profiles <- as.data.frame(centers_original)
+colnames(cluster_profiles) <- colnames(features)
+
+cluster_profiles        # mean profile of each cluster
+table(df$Cluster)       # how many students in each cluster
+```
